@@ -15,6 +15,7 @@ public class AuthController : Controller
         _logger = logger;
     }
 
+    [HttpGet("/")]
     [HttpGet("/login")]
     public IActionResult Login()
     {

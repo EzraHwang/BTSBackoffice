@@ -325,10 +325,14 @@
 
         // Initialize page
         document.addEventListener('DOMContentLoaded', function() {
+            // Set default active button
+            document.querySelector('[onclick="changeTimeRange(\'today\')"]').classList.add('active');
+
+            // Instead of using server-side data, immediately load fresh data via API
             setTimeout(() => {
                 showActualData();
-                initializeCharts();
-            }, 1000);
+                loadDashboardData('today'); // Load fresh data which will update charts
+            }, 100);
         });
 
         function showActualData() {
@@ -341,128 +345,7 @@
             });
         }
 
-        function initializeCharts() {
-            const dailyTickets = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.DailyTickets));
-            const ticketTypes = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.TicketTypes));
-            const hourlyPurchases = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.HourlyPurchaseDistribution));
-
-            // Tickets Chart
-            const ticketsCtx = document.getElementById('ticketsChart').getContext('2d');
-            ticketsChart = new Chart(ticketsCtx, {
-                type: 'bar',
-                data: {
-                    labels: dailyTickets.map(d => new Date(d.date).toLocaleDateString()),
-                    datasets: [{
-                        label: '票數',
-                        data: dailyTickets.map(d => d.value),
-                        backgroundColor: '#36A2EB',
-                        borderRadius: 6,
-                        borderSkipped: false,
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    }
-                }
-            });
-
-            // Pie Chart
-            const pieCtx = document.getElementById('pieChart').getContext('2d');
-            const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'];
-            pieChart = new Chart(pieCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: ticketTypes.map(t => t.label),
-                    datasets: [{
-                        data: ticketTypes.map(t => t.count),
-                        backgroundColor: colors.slice(0, ticketTypes.length),
-                        borderWidth: 0,
-                        cutout: '60%'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: { usePointStyle: true }
-                        }
-                    }
-                }
-            });
-
-            // Hourly Purchase Chart
-            const hourlyCtx = document.getElementById('hourlyChart').getContext('2d');
-            hourlyChart = new Chart(hourlyCtx, {
-                type: 'line',
-                data: {
-                    labels: hourlyPurchases.map(h => h.timeLabel),
-                    datasets: [
-                        {
-                            label: '購買數量',
-                            data: hourlyPurchases.map(h => h.purchaseCount),
-                            borderColor: '#FF6384',
-                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: '用戶數',
-                            data: hourlyPurchases.map(h => h.userCount),
-                            borderColor: '#36A2EB',
-                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
-                            yAxisID: 'y1'
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        mode: 'index',
-                        intersect: false,
-                    },
-                    scales: {
-                        x: {
-                            display: true,
-                            title: {
-                                display: true,
-                                text: '時間'
-                            }
-                        },
-                        y: {
-                            type: 'linear',
-                            display: true,
-                            position: 'left',
-                            title: {
-                                display: true,
-                                text: '購買數量'
-                            }
-                        },
-                        y1: {
-                            type: 'linear',
-                            display: true,
-                            position: 'right',
-                            title: {
-                                display: true,
-                                text: '用戶數'
-                            },
-                            grid: {
-                                drawOnChartArea: false,
-                            },
-                        }
-                    }
-                }
-            });
-        }
+        // initializeCharts function removed - charts now initialized in updateCharts
 
         function changeTimeRange(range) {
             if (isLoading) return;
@@ -565,21 +448,159 @@
         }
 
         function updateCharts(data) {
-            // Update tickets chart
-            ticketsChart.data.labels = data.dailyTickets.map(d => new Date(d.date).toLocaleDateString());
-            ticketsChart.data.datasets[0].data = data.dailyTickets.map(d => d.value);
-            ticketsChart.update();
+            // Ensure we have valid data
+            if (!data || !data.dailyTickets) {
+                console.error('Invalid chart data received');
+                return;
+            }
 
-            // Update pie chart
-            pieChart.data.labels = data.ticketTypes.map(t => t.label);
-            pieChart.data.datasets[0].data = data.ticketTypes.map(t => t.count);
-            pieChart.update();
+            // Initialize or update tickets chart
+            if (!ticketsChart) {
+                initializeTicketsChart(data.dailyTickets);
+            } else {
+                ticketsChart.data.labels = data.dailyTickets.map(d => new Date(d.date).toLocaleDateString());
+                ticketsChart.data.datasets[0].data = data.dailyTickets.map(d => d.value);
+                ticketsChart.update();
+            }
 
-            // Update hourly chart
-            hourlyChart.data.labels = data.hourlyPurchaseDistribution.map(h => h.timeLabel);
-            hourlyChart.data.datasets[0].data = data.hourlyPurchaseDistribution.map(h => h.purchaseCount);
-            hourlyChart.data.datasets[1].data = data.hourlyPurchaseDistribution.map(h => h.userCount);
-            hourlyChart.update();
+            // Initialize or update pie chart
+            if (!pieChart && data.ticketTypes && data.ticketTypes.length > 0) {
+                initializePieChart(data.ticketTypes);
+            } else if (pieChart) {
+                pieChart.data.labels = data.ticketTypes.map(t => t.label);
+                pieChart.data.datasets[0].data = data.ticketTypes.map(t => t.count);
+                pieChart.update();
+            }
+
+            // Initialize or update hourly chart
+            if (!hourlyChart && data.hourlyPurchaseDistribution) {
+                initializeHourlyChart(data.hourlyPurchaseDistribution);
+            } else if (hourlyChart) {
+                hourlyChart.data.labels = data.hourlyPurchaseDistribution.map(h => h.timeLabel);
+                hourlyChart.data.datasets[0].data = data.hourlyPurchaseDistribution.map(h => h.purchaseCount);
+                hourlyChart.data.datasets[1].data = data.hourlyPurchaseDistribution.map(h => h.userCount);
+                hourlyChart.update();
+            }
+        }
+
+        function initializeTicketsChart(dailyTickets) {
+            const ticketsCtx = document.getElementById('ticketsChart').getContext('2d');
+            ticketsChart = new Chart(ticketsCtx, {
+                type: 'bar',
+                data: {
+                    labels: dailyTickets.map(d => new Date(d.date).toLocaleDateString()),
+                    datasets: [{
+                        label: '票數',
+                        data: dailyTickets.map(d => d.value),
+                        backgroundColor: '#36A2EB',
+                        borderRadius: 6,
+                        borderSkipped: false,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function initializePieChart(ticketTypes) {
+            const pieCtx = document.getElementById('pieChart').getContext('2d');
+            const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'];
+            pieChart = new Chart(pieCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ticketTypes.map(t => t.label),
+                    datasets: [{
+                        data: ticketTypes.map(t => t.count),
+                        backgroundColor: colors.slice(0, ticketTypes.length),
+                        borderWidth: 0,
+                        cutout: '60%'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { usePointStyle: true }
+                        }
+                    }
+                }
+            });
+        }
+
+        function initializeHourlyChart(hourlyPurchases) {
+            const hourlyCtx = document.getElementById('hourlyChart').getContext('2d');
+            hourlyChart = new Chart(hourlyCtx, {
+                type: 'line',
+                data: {
+                    labels: hourlyPurchases.map(h => h.timeLabel),
+                    datasets: [
+                        {
+                            label: '購買數量',
+                            data: hourlyPurchases.map(h => h.purchaseCount),
+                            borderColor: '#FF6384',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: '用戶數',
+                            data: hourlyPurchases.map(h => h.userCount),
+                            borderColor: '#36A2EB',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: '時間'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '購買數量'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '用戶數'
+                            },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                        }
+                    }
+                }
+            });
         }
 
         function updateStationTable(stations) {
