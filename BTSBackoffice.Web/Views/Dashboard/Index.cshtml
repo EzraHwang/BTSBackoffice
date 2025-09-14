@@ -1,0 +1,601 @@
+@model BTSBackoffice.Web.Models.ViewModels.DashboardViewModel
+@{
+    ViewData["Title"] = "儀表板";
+    var username = Context.Session.GetString("Username");
+    var loginTime = Context.Session.GetString("LoginTime");
+}
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - Ticketrip 後台管理</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Arial', sans-serif;
+        }
+        .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 2px 4px rgba(0,0,0,.1);
+        }
+        .kpi-card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.1);
+            transition: transform 0.2s ease;
+        }
+        .kpi-card:hover {
+            transform: translateY(-2px);
+        }
+        .kpi-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .chart-card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.1);
+        }
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+        .skeleton-text {
+            height: 20px;
+            border-radius: 4px;
+        }
+        .skeleton-number {
+            height: 36px;
+            border-radius: 6px;
+        }
+        @@keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        .time-range-btn {
+            border-radius: 20px;
+            padding: 0.5rem 1rem;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            transition: all 0.3s ease;
+        }
+        .time-range-btn.active {
+            background: #667eea;
+            color: white;
+        }
+        .time-range-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+        }
+        .analytics-table {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-ticket-alt me-2"></i>Ticketrip 後台管理
+            </a>
+            <div class="navbar-nav ms-auto">
+                <div class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                        <i class="fas fa-user me-1"></i>@username
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><span class="dropdown-item-text"><small>登入時間: @loginTime</small></span></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>登出</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        @if (TempData["Error"] != null)
+        {
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                @TempData["Error"]
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        }
+
+        <!-- Time Range Filter -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <span class="me-3"><strong>時間範圍:</strong></span>
+                    <button type="button" class="btn time-range-btn @(Model.SelectedRange == "today" ? "active" : "")"
+                            onclick="changeTimeRange('today')">今天</button>
+                    <button type="button" class="btn time-range-btn @(Model.SelectedRange == "7d" ? "active" : "")"
+                            onclick="changeTimeRange('7d')">7 天</button>
+                    <button type="button" class="btn time-range-btn @(Model.SelectedRange == "30d" ? "active" : "")"
+                            onclick="changeTimeRange('30d')">30 天</button>
+                    <button type="button" class="btn time-range-btn @(Model.SelectedRange == "custom" ? "active" : "")"
+                            onclick="showCustomRange()">自訂範圍</button>
+
+                    <div class="ms-auto text-muted">
+                        <small><i class="fas fa-sync-alt me-1"></i>最後更新: @Model.LastSync.ToString("yyyy/MM/dd HH:mm:ss")</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Custom Date Range Modal -->
+        <div class="modal fade" id="customRangeModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">選擇自訂時間範圍</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <label class="form-label">開始日期</label>
+                                <input type="date" id="customStartDate" class="form-control" value="@Model.CustomStartDate?.ToString("yyyy-MM-dd")">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">結束日期</label>
+                                <input type="date" id="customEndDate" class="form-control" value="@Model.CustomEndDate?.ToString("yyyy-MM-dd")">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="button" class="btn btn-primary" onclick="applyCustomRange()">套用</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="row mb-4">
+            <div class="col-lg-4 col-md-6 mb-3">
+                <div class="kpi-card p-3 h-100">
+                    <div class="d-flex align-items-center">
+                        <div class="kpi-icon bg-primary bg-opacity-10 text-primary me-3">
+                            <i class="fas fa-ticket-alt"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="text-muted small">總售票數</div>
+                            <div class="h5 mb-0 loading-target" data-value="@Model.TotalTicketsSold.ToString("N0")">
+                                <div class="skeleton skeleton-number"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-6 mb-3">
+                <div class="kpi-card p-3 h-100">
+                    <div class="d-flex align-items-center">
+                        <div class="kpi-icon bg-success bg-opacity-10 text-success me-3">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="text-muted small">總用戶數</div>
+                            <div class="h5 mb-0 loading-target" data-value="@Model.TotalUsers.ToString("N0")">
+                                <div class="skeleton skeleton-number"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-6 mb-3">
+                <div class="kpi-card p-3 h-100">
+                    <div class="d-flex align-items-center">
+                        <div class="kpi-icon bg-info bg-opacity-10 text-info me-3">
+                            <i class="fas fa-shopping-cart"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="text-muted small">購買用戶數</div>
+                            <div class="h5 mb-0 loading-target" data-value="@Model.TotalPurchasingUsers.ToString("N0")">
+                                <div class="skeleton skeleton-number"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts and Analytics -->
+        <div class="row">
+            <div class="col-lg-6 mb-4">
+                <div class="chart-card p-4">
+                    <h5 class="mb-3"><i class="fas fa-chart-bar me-2 text-success"></i>每日票數統計</h5>
+                    <div class="chart-container">
+                        <canvas id="ticketsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6 mb-4">
+                <div class="chart-card p-4">
+                    <h5 class="mb-3"><i class="fas fa-chart-pie me-2 text-info"></i>票券類型分佈</h5>
+                    <div class="chart-container">
+                        <canvas id="pieChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6 mb-4">
+                <div class="chart-card p-4">
+                    <h5 class="mb-3"><i class="fas fa-clock me-2 text-warning"></i>時段購買分析</h5>
+                    <div class="chart-container">
+                        <canvas id="hourlyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6 mb-4">
+                <div class="chart-card p-4">
+                    <h5 class="mb-3"><i class="fas fa-train me-2 text-primary"></i>熱門車站排行</h5>
+                    <div class="analytics-table">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>車站路線</th>
+                                    <th>票數</th>
+                                    <th>用戶數</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stationTableBody">
+                                @foreach (var station in Model.PopularStations.Take(10))
+                                {
+                                    <tr>
+                                        <td><strong>@station.Route</strong></td>
+                                        <td><span class="badge bg-primary">@station.TicketCount 張</span></td>
+                                        <td><span class="badge bg-secondary">@station.UserCount 人</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ticket Type Analytics Table -->
+        <div class="row">
+            <div class="col-12">
+                <div class="chart-card p-4">
+                    <h5 class="mb-3"><i class="fas fa-chart-line me-2 text-secondary"></i>票券類型詳細分析</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>票券類型</th>
+                                    <th>售出數量</th>
+                                    <th>購買用戶</th>
+                                    <th>佔總票數比例</th>
+                                    <th>平均每用戶購買</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var ticketType in Model.TicketTypes)
+                                {
+                                    <tr>
+                                        <td><strong>@ticketType.Label</strong></td>
+                                        <td><span class="badge bg-primary fs-6">@ticketType.Count.ToString("N0") 張</span></td>
+                                        <td><span class="badge bg-success fs-6">@ticketType.Users.ToString("N0") 人</span></td>
+                                        <td>
+                                            <div class="progress" style="height: 20px;">
+                                                <div class="progress-bar" role="progressbar" style="width: @ticketType.Percentage%">
+                                                    @ticketType.Percentage.ToString("F1")%
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td><span class="text-muted">@((ticketType.Users > 0 ? (decimal)ticketType.Count / ticketType.Users : 0).ToString("F1")) 張/人</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let ticketsChart, pieChart, hourlyChart;
+        let isLoading = false;
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(() => {
+                showActualData();
+                initializeCharts();
+            }, 1000);
+        });
+
+        function showActualData() {
+            document.querySelectorAll('.loading-target').forEach(target => {
+                const skeleton = target.querySelector('.skeleton');
+                if (skeleton) {
+                    skeleton.remove();
+                    target.textContent = target.dataset.value;
+                }
+            });
+        }
+
+        function initializeCharts() {
+            const dailyTickets = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.DailyTickets));
+            const ticketTypes = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.TicketTypes));
+            const hourlyPurchases = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.HourlyPurchaseDistribution));
+
+            // Tickets Chart
+            const ticketsCtx = document.getElementById('ticketsChart').getContext('2d');
+            ticketsChart = new Chart(ticketsCtx, {
+                type: 'bar',
+                data: {
+                    labels: dailyTickets.map(d => new Date(d.date).toLocaleDateString()),
+                    datasets: [{
+                        label: '票數',
+                        data: dailyTickets.map(d => d.value),
+                        backgroundColor: '#36A2EB',
+                        borderRadius: 6,
+                        borderSkipped: false,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+
+            // Pie Chart
+            const pieCtx = document.getElementById('pieChart').getContext('2d');
+            const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'];
+            pieChart = new Chart(pieCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ticketTypes.map(t => t.label),
+                    datasets: [{
+                        data: ticketTypes.map(t => t.count),
+                        backgroundColor: colors.slice(0, ticketTypes.length),
+                        borderWidth: 0,
+                        cutout: '60%'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { usePointStyle: true }
+                        }
+                    }
+                }
+            });
+
+            // Hourly Purchase Chart
+            const hourlyCtx = document.getElementById('hourlyChart').getContext('2d');
+            hourlyChart = new Chart(hourlyCtx, {
+                type: 'line',
+                data: {
+                    labels: hourlyPurchases.map(h => h.timeLabel),
+                    datasets: [
+                        {
+                            label: '購買數量',
+                            data: hourlyPurchases.map(h => h.purchaseCount),
+                            borderColor: '#FF6384',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: '用戶數',
+                            data: hourlyPurchases.map(h => h.userCount),
+                            borderColor: '#36A2EB',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: '時間'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '購買數量'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '用戶數'
+                            },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                        }
+                    }
+                }
+            });
+        }
+
+        function changeTimeRange(range) {
+            if (isLoading) return;
+
+            updateUI(range);
+            loadDashboardData(range);
+        }
+
+        function showCustomRange() {
+            const modal = new bootstrap.Modal(document.getElementById('customRangeModal'));
+            modal.show();
+        }
+
+        function applyCustomRange() {
+            const startDate = document.getElementById('customStartDate').value;
+            const endDate = document.getElementById('customEndDate').value;
+
+            if (!startDate || !endDate) {
+                alert('請選擇開始和結束日期');
+                return;
+            }
+
+            if (new Date(startDate) > new Date(endDate)) {
+                alert('開始日期不能晚於結束日期');
+                return;
+            }
+
+            const modal = bootstrap.Modal.getInstance(document.getElementById('customRangeModal'));
+            modal.hide();
+
+            updateUI('custom');
+            loadDashboardData('custom', startDate, endDate);
+        }
+
+        function updateUI(range) {
+            // Update button states
+            document.querySelectorAll('.time-range-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event?.target?.classList.add('active');
+
+            // Show skeleton loading
+            document.querySelectorAll('.loading-target').forEach(target => {
+                target.innerHTML = '<div class="skeleton skeleton-number"></div>';
+            });
+        }
+
+        function loadDashboardData(range, startDate = null, endDate = null) {
+            if (isLoading) return;
+
+            isLoading = true;
+
+            let url = `/api/dashboard?range=${range}`;
+            if (startDate) url += `&startDate=${startDate}`;
+            if (endDate) url += `&endDate=${endDate}`;
+
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateDashboard(data.data);
+                    } else {
+                        alert('載入資料失敗: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('載入資料時發生錯誤');
+                })
+                .finally(() => {
+                    isLoading = false;
+                });
+        }
+
+        function updateDashboard(data) {
+            // Update KPIs
+            document.querySelectorAll('.loading-target').forEach((target, index) => {
+                const skeleton = target.querySelector('.skeleton');
+                if (skeleton) {
+                    skeleton.remove();
+                    switch(index) {
+                        case 0: target.textContent = data.totalTicketsSold.toLocaleString(); break;
+                        case 1: target.textContent = data.totalUsers.toLocaleString(); break;
+                        case 2: target.textContent = data.totalPurchasingUsers.toLocaleString(); break;
+                    }
+                }
+            });
+
+            // Update charts
+            updateCharts(data);
+
+            // Update station table
+            updateStationTable(data.popularStations);
+
+            // Update last sync time
+            const syncElement = document.querySelector('.ms-auto.text-muted small');
+            if (syncElement) {
+                syncElement.innerHTML = '<i class="fas fa-sync-alt me-1"></i>最後更新: ' + new Date().toLocaleString();
+            }
+        }
+
+        function updateCharts(data) {
+            // Update tickets chart
+            ticketsChart.data.labels = data.dailyTickets.map(d => new Date(d.date).toLocaleDateString());
+            ticketsChart.data.datasets[0].data = data.dailyTickets.map(d => d.value);
+            ticketsChart.update();
+
+            // Update pie chart
+            pieChart.data.labels = data.ticketTypes.map(t => t.label);
+            pieChart.data.datasets[0].data = data.ticketTypes.map(t => t.count);
+            pieChart.update();
+
+            // Update hourly chart
+            hourlyChart.data.labels = data.hourlyPurchaseDistribution.map(h => h.timeLabel);
+            hourlyChart.data.datasets[0].data = data.hourlyPurchaseDistribution.map(h => h.purchaseCount);
+            hourlyChart.data.datasets[1].data = data.hourlyPurchaseDistribution.map(h => h.userCount);
+            hourlyChart.update();
+        }
+
+        function updateStationTable(stations) {
+            const tbody = document.getElementById('stationTableBody');
+            tbody.innerHTML = '';
+
+            stations.slice(0, 10).forEach(station => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${station.route}</strong></td>
+                    <td><span class="badge bg-primary">${station.ticketCount} 張</span></td>
+                    <td><span class="badge bg-secondary">${station.userCount} 人</span></td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+    </script>
+</body>
+</html>
